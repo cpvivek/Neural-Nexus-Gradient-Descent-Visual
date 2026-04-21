@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neural Nexus: Gradient Descent 3D</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/DragControls.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #020617;
+            font-family: 'Inter', system-ui, sans-serif;
+            color: #e2e8f0;
+        }
+        canvas {
+            display: block;
+        }
+        .glass {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+        }
+        .glow-text {
+            text-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
+        }
+        .active-btn {
+            background: rgba(56, 189, 248, 0.2);
+            border-color: rgba(56, 189, 248, 0.5);
+            color: #38bdf8;
+        }
+        #ui-overlay {
+            pointer-events: none;
+        }
+        #ui-overlay * {
+            pointer-events: auto;
+        }
+        .slider-thumb::-webkit-slider-thumb {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #38bdf8;
+            cursor: pointer;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #38bdf8;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- UI Overlay -->
+    <div id="ui-overlay" class="fixed inset-0 z-10 flex flex-col justify-between p-6">
+        <!-- Header -->
+        <div class="flex justify-between items-start">
+            <div class="glass p-4 rounded-xl max-w-sm">
+                <h1 class="text-2xl font-bold tracking-tighter glow-text text-sky-400">NEURAL NEXUS</h1>
+                <p class="text-xs uppercase tracking-widest text-slate-400 mt-1">Loss Landscape Visualizer v3.2</p>
+                <div class="mt-4 space-y-1 text-sm">
+                    <p id="stats-coords">Position: (0.00, 0.00)</p>
+                    <p id="stats-loss" class="font-mono text-emerald-400">Loss: 0.0000</p>
+                    <p id="stats-steps">Steps: 0</p>
+                </div>
+                <div class="mt-3 p-2 bg-sky-500/10 border border-sky-500/20 rounded text-[10px] text-sky-300 uppercase tracking-tight">
+                    Interaction: Click & Drag the glowing sphere to set start point
+                </div>
+            </div>
+
+            <div class="glass p-4 rounded-xl flex flex-col gap-3 min-w-[160px]">
+                <button id="reset-btn" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition text-sm font-medium border border-slate-600">Reset System</button>
+                <button id="play-btn" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 rounded-lg transition text-sm font-medium">Start Descent</button>
+                
+                <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-700">
+                    <span class="text-[10px] uppercase font-bold text-slate-400">Auto-Rotate</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="rotate-toggle" class="sr-only peer" checked>
+                        <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-600"></div>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls Footer -->
+        <div class="flex justify-center">
+            <div class="glass p-5 rounded-2xl flex flex-wrap gap-6 items-center max-w-4xl">
+                <!-- Optimizer Selector -->
+                <div class="flex flex-col gap-2">
+                    <span class="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Optimizer Engine</span>
+                    <div class="flex gap-2" id="optimizer-group">
+                        <button data-opt="sgd" class="px-3 py-1.5 rounded-md text-xs border border-slate-700 hover:border-sky-500 transition active-btn">SGD</button>
+                        <button data-opt="momentum" class="px-3 py-1.5 rounded-md text-xs border border-slate-700 hover:border-sky-500 transition">Momentum</button>
+                        <button data-opt="adam" class="px-3 py-1.5 rounded-md text-xs border border-slate-700 hover:border-sky-500 transition">Adam</button>
+                    </div>
+                </div>
+
+                <div class="w-px h-10 bg-slate-700 hidden md:block"></div>
+
+                <!-- Parameters -->
+                <div class="flex flex-col gap-1 min-w-[140px]">
+                    <div class="flex justify-between">
+                        <span class="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Learning Rate</span>
+                        <span id="lr-val" class="text-xs font-mono text-sky-400">0.05</span>
+                    </div>
+                    <input type="range" id="lr-slider" min="0.001" max="0.2" step="0.001" value="0.05" class="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer slider-thumb">
+                </div>
+
+                <div class="flex flex-col gap-2">
+                    <span class="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Topology</span>
+                    <select id="function-select" class="bg-slate-800 border border-slate-700 rounded p-1 text-xs focus:outline-none focus:border-sky-500">
+                        <option value="bowl">Classic Bowl (Quadratic)</option>
+                        <option value="peaks">Complex Peaks</option>
+                        <option value="saddle">Saddle Point</option>
+                    </select>
+                </div>
+                
+                <p class="text-[9px] text-slate-500 hidden lg:block italic">Drag the sphere to set start • Right-click to pan • Scroll to zoom</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Constants & Config ---
+        let scene, camera, renderer, controls, dragControls, surface, ball, pathLine;
+        let points = [];
+        let isRunning = false;
+        let autoRotate = true;
+        let isDragging = false;
+        let currentOptimizer = 'sgd';
+        let currentLR = 0.05;
+        let steps = 0;
+
+        let state = {
+            pos: new THREE.Vector2(-4, -4),
+            velocity: new THREE.Vector2(0, 0),
+            m: new THREE.Vector2(0, 0),
+            v: new THREE.Vector2(0, 0),
+            t: 0
+        };
+
+        const functions = {
+            bowl: (x, y) => (x*x + y*y) * 0.1,
+            peaks: (x, y) => {
+                return (3 * Math.pow(1 - x, 2) * Math.exp(-(x * x) - (y + 1) * (y + 1)) -
+                        10 * (x / 5 - Math.pow(x, 3) - Math.pow(y, 5)) * Math.exp(-x * x - y * y) -
+                        1 / 3 * Math.exp(-(x + 1) * (x + 1) - y * y)) * 0.5;
+            },
+            saddle: (x, y) => (x*x - y*y) * 0.1
+        };
+
+        function getGradient(x, y, fnType) {
+            const h = 0.01;
+            const f = functions[fnType];
+            const dx = (f(x + h, y) - f(x - h, y)) / (2 * h);
+            const dy = (f(x, y + h) - f(x, y - h)) / (2 * h);
+            return new THREE.Vector2(dx, dy);
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020617);
+            scene.fog = new THREE.FogExp2(0x020617, 0.05);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(10, 10, 10);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.body.appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = true;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+
+            const pointLight = new THREE.PointLight(0x38bdf8, 2, 50);
+            pointLight.position.set(5, 10, 5);
+            scene.add(pointLight);
+
+            // Stars background
+            const starGeometry = new THREE.BufferGeometry();
+            const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05 });
+            const starVertices = [];
+            for(let i = 0; i < 2000; i++) {
+                starVertices.push((Math.random() - 0.5) * 100, (Math.random() - 0.5) * 100, (Math.random() - 0.5) * 100);
+            }
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            scene.add(new THREE.Points(starGeometry, starMaterial));
+
+            createSurface();
+            createBall();
+            createPath();
+            setupDragControls();
+            
+            window.addEventListener('resize', onWindowResize);
+            setupUI();
+            animate();
+        }
+
+        function createSurface() {
+            if (surface) scene.remove(surface);
+            
+            const fnType = document.getElementById('function-select').value;
+            const geometry = new THREE.PlaneGeometry(15, 15, 120, 120);
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x38bdf8,
+                side: THREE.DoubleSide,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.2
+            });
+
+            const vertices = geometry.attributes.position.array;
+            for (let i = 0; i < vertices.length; i += 3) {
+                const x = vertices[i];
+                const y = vertices[i + 1];
+                vertices[i + 2] = functions[fnType](x, y);
+            }
+            geometry.computeVertexNormals();
+
+            surface = new THREE.Mesh(geometry, material);
+            surface.rotation.x = -Math.PI / 2;
+            scene.add(surface);
+
+            const solidMat = new THREE.MeshPhongMaterial({
+                color: 0x0f172a,
+                side: THREE.DoubleSide,
+                flatShading: true,
+                transparent: true,
+                opacity: 0.8
+            });
+            const solid = new THREE.Mesh(geometry, solidMat);
+            surface.add(solid);
+        }
+
+        function createBall() {
+            if (ball) scene.remove(ball);
+            const geometry = new THREE.SphereGeometry(0.25, 32, 32);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0x38bdf8, 
+                emissive: 0x38bdf8,
+                emissiveIntensity: 2 
+            });
+            ball = new THREE.Mesh(geometry, material);
+            scene.add(ball);
+            updateBallPosition();
+        }
+
+        function createPath() {
+            if (pathLine) scene.remove(pathLine);
+            const material = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.8 });
+            const geometry = new THREE.BufferGeometry().setFromPoints([ball.position.clone()]);
+            pathLine = new THREE.Line(geometry, material);
+            scene.add(pathLine);
+            points = [ball.position.clone()];
+        }
+
+        function setupDragControls() {
+            if (dragControls) dragControls.dispose();
+            
+            dragControls = new THREE.DragControls([ball], camera, renderer.domElement);
+
+            dragControls.addEventListener('dragstart', function () {
+                controls.enabled = false; // Disable orbit while dragging
+                isDragging = true;
+                isRunning = false; // Pause while moving
+                document.getElementById('play-btn').innerText = "Start Descent";
+                points = []; // Clear path
+                steps = 0;
+            });
+
+            dragControls.addEventListener('drag', function (event) {
+                // Constrain ball to surface height and map plane bounds
+                const fnType = document.getElementById('function-select').value;
+                
+                // Boundaries (-7.5 to 7.5 based on PlaneGeometry 15)
+                ball.position.x = Math.max(-7.5, Math.min(7.5, ball.position.x));
+                ball.position.z = Math.max(-7.5, Math.min(7.5, ball.position.z));
+                
+                // Internal state update: world x is x, world z is -y in our logic
+                state.pos.set(ball.position.x, -ball.position.z);
+                
+                // Snap height to function
+                const z = functions[fnType](state.pos.x, state.pos.y);
+                ball.position.y = z + 0.12;
+
+                updateUIStats();
+            });
+
+            dragControls.addEventListener('dragend', function () {
+                controls.enabled = true;
+                isDragging = false;
+                pathLine.geometry.setFromPoints([ball.position.clone()]);
+            });
+        }
+
+        function updateBallPosition() {
+            const fnType = document.getElementById('function-select').value;
+            const z = functions[fnType](state.pos.x, state.pos.y);
+            ball.position.set(state.pos.x, z + 0.12, -state.pos.y);
+            updateUIStats();
+        }
+
+        function updateUIStats() {
+            const fnType = document.getElementById('function-select').value;
+            const z = functions[fnType](state.pos.x, state.pos.y);
+            document.getElementById('stats-coords').innerText = `Position: (${state.pos.x.toFixed(2)}, ${state.pos.y.toFixed(2)})`;
+            document.getElementById('stats-loss').innerText = `Loss: ${z.toFixed(6)}`;
+            document.getElementById('stats-steps').innerText = `Steps: ${steps}`;
+        }
+
+        function step() {
+            if (!isRunning || isDragging) return;
+
+            const fnType = document.getElementById('function-select').value;
+            const grad = getGradient(state.pos.x, state.pos.y, fnType);
+            const lr = currentLR;
+
+            if (currentOptimizer === 'sgd') {
+                state.pos.x -= lr * grad.x;
+                state.pos.y -= lr * grad.y;
+            } 
+            else if (currentOptimizer === 'momentum') {
+                const gamma = 0.9;
+                state.velocity.x = gamma * state.velocity.x + lr * grad.x;
+                state.velocity.y = gamma * state.velocity.y + lr * grad.y;
+                state.pos.x -= state.velocity.x;
+                state.pos.y -= state.velocity.y;
+            }
+            else if (currentOptimizer === 'adam') {
+                const beta1 = 0.9, beta2 = 0.999, eps = 1e-8;
+                state.t += 1;
+                state.m.x = beta1 * state.m.x + (1 - beta1) * grad.x;
+                state.m.y = beta1 * state.m.y + (1 - beta1) * grad.y;
+                state.v.x = beta2 * state.v.x + (1 - beta2) * grad.x * grad.x;
+                state.v.y = beta2 * state.v.y + (1 - beta2) * grad.y * grad.y;
+                
+                const mHatX = state.m.x / (1 - Math.pow(beta1, state.t));
+                const mHatY = state.m.y / (1 - Math.pow(beta1, state.t));
+                const vHatX = state.v.x / (1 - Math.pow(beta2, state.t));
+                const vHatY = state.v.y / (1 - Math.pow(beta2, state.t));
+                
+                state.pos.x -= lr * mHatX / (Math.sqrt(vHatX) + eps);
+                state.pos.y -= lr * mHatY / (Math.sqrt(vHatY) + eps);
+            }
+
+            steps++;
+            updateBallPosition();
+            
+            points.push(ball.position.clone());
+            if (points.length > 1000) points.shift();
+            pathLine.geometry.setFromPoints(points);
+        }
+
+        function reset() {
+            isRunning = false;
+            isDragging = false;
+            steps = 0;
+            state.pos.set(-4 + Math.random() * 2, -4 + Math.random() * 2);
+            state.velocity.set(0, 0);
+            state.m.set(0, 0);
+            state.v.set(0, 0);
+            state.t = 0;
+            points = [];
+            updateBallPosition();
+            pathLine.geometry.setFromPoints([ball.position.clone()]);
+            document.getElementById('play-btn').innerText = "Start Descent";
+        }
+
+        function setupUI() {
+            document.getElementById('play-btn').onclick = () => {
+                isRunning = !isRunning;
+                document.getElementById('play-btn').innerText = isRunning ? "Pause System" : "Resume Descent";
+                if(isRunning) {
+                    // Reset internal counters if starting fresh from a drag
+                    if(steps === 0) {
+                        state.velocity.set(0, 0);
+                        state.m.set(0, 0);
+                        state.v.set(0, 0);
+                        state.t = 0;
+                    }
+                }
+            };
+
+            document.getElementById('reset-btn').onclick = reset;
+
+            document.getElementById('lr-slider').oninput = (e) => {
+                currentLR = parseFloat(e.target.value);
+                document.getElementById('lr-val').innerText = currentLR.toFixed(3);
+            };
+
+            document.getElementById('rotate-toggle').onchange = (e) => {
+                autoRotate = e.target.checked;
+            };
+
+            document.getElementById('function-select').onchange = () => {
+                createSurface();
+                reset();
+            };
+
+            const optBtns = document.querySelectorAll('#optimizer-group button');
+            optBtns.forEach(btn => {
+                btn.onclick = () => {
+                    optBtns.forEach(b => b.classList.remove('active-btn'));
+                    btn.classList.add('active-btn');
+                    currentOptimizer = btn.dataset.opt;
+                    reset();
+                };
+            });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (autoRotate && !isDragging) {
+                const time = Date.now() * 0.0002;
+                camera.position.x = Math.cos(time) * 14;
+                camera.position.z = Math.sin(time) * 14;
+                camera.lookAt(0, 0, 0);
+            }
+
+            controls.update();
+
+            if (isRunning && steps < 2000) {
+                step();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
